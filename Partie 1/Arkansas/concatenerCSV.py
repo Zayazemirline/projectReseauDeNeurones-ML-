@@ -1,19 +1,29 @@
 import pandas as pd
 
-# Charger les 2 parties
-part1 = pd.read_csv('/content/Arkansas_part1.csv')
-part2 = pd.read_csv('/content/Arkansas_part2.csv')
 
-print("Part1 shape:", part1.shape)
-print("Part2 shape:", part2.shape)
+csv1 = r'C:\Users\yousr\Downloads\drive-download-20260421T230837Z-3-001\arkansas_corn_1522.csv'
+csv2 = r'C:\Users\yousr\Downloads\drive-download-20260421T230837Z-3-001\arkansas_cotton_762.csv'
+csv3 = r'C:\Users\yousr\Downloads\drive-download-20260421T230837Z-3-001\arkansas_other_616.csv'
+csv4 = r'C:\Users\yousr\Downloads\drive-download-20260421T230837Z-3-001\arkansas_rice_2423.csv'
+csv5 = r'C:\Users\yousr\Downloads\drive-download-20260421T230837Z-3-001\arkansas_soybeans_4677.csv'
+
+df1 = pd.read_csv(csv1)
+df2 = pd.read_csv(csv2)
+df3 = pd.read_csv(csv3)
+df4 = pd.read_csv(csv4)
+df5 = pd.read_csv(csv5)
+
 
 # Fusionner
-df = pd.concat([part1, part2], ignore_index=True)
+df = pd.concat([df1, df2, df3, df4,df5], ignore_index=True)
 print("Shape fusionné:", df.shape)
 
 # Nettoyage colonnes inutiles
 cols_to_drop = [c for c in ['.geo', 'system:index', 'cropland'] if c in df.columns]
 df = df.drop(columns=cols_to_drop)
+
+if 'random' in df.columns:
+    df = df.drop(columns=['random'])
 
 # Supprimer nulls
 df = df.dropna()
