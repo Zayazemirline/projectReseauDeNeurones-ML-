@@ -1,37 +1,94 @@
-// ===========================
-// Zones Arkansas
-// ===========================
-var zone1 = ee.Geometry.Rectangle([-90.85, 35.55, -90.40, 35.85]);
-var zone2 = ee.Geometry.Rectangle([-91.55, 34.20, -91.10, 34.50]);
-var arkansas = zone1.union(zone2);
 
+
+// 1. Stuttgart (rice + soybeans)
+var zone1 = ee.Geometry.Rectangle([-92.10, 34.20, -91.05, 34.85]);
+
+// 2. Jonesboro (corn + soybeans)
+var zone2 = ee.Geometry.Rectangle([-91.40, 35.35, -89.95, 36.30]);
+
+// 3. Pine Bluff (cotton + mix crops)
+var zone3 = ee.Geometry.Rectangle([-92.70, 33.85, -91.40, 34.65]);
+
+// 4. Fruits zone (Ozarks / NW Arkansas)
+var zone4 = ee.Geometry.Rectangle([-94.90, 35.60, -93.40, 36.80]);
+
+// 5. Eastern Arkansas Soybean Belt
+var zone5 = ee.Geometry.Rectangle([-91.30, 34.25, -90.55, 34.95]);
+
+// 6. Mississippi Delta
+var zone6 = ee.Geometry.Rectangle(-92.40, 33.80,-90.30, 35.40);
+
+// 7.Northeast Arkansas Crop Extension Belt
+var zone7 = ee.Geometry.Rectangle([-90.60, 35.50,-89.90, 36.05]);
+
+// 8.Southeast Arkansas Crop Corridor
+var zone8 = ee.Geometry.Rectangle([-91.90, 33.25,-91.00, 33.95]);
+
+var zone9 = ee.Geometry.Rectangle([
+  -91.85, 34.55,
+  -91.25, 35.10
+]);
+
+
+
+
+
+
+
+// Fusion
+var arkansas = zone1
+  .union(zone2)
+  .union(zone3)
+  .union(zone4)
+  .union(zone5)
+  .union(zone6)
+  .union(zone7)
+  .union(zone8)
+  .union(zone9);
+
+// ===========================
 var startDate = '2021-01-01';
 var endDate   = '2021-12-31';
-var bands     = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12'];
 
+var bands = ['B2','B3','B4','B5','B6','B7','B8','B8A','B11','B12'];
+
+// ===========================
+// Masque nuages
+// ===========================
 function maskClouds(image) {
   var scl = image.select('SCL');
-  var mask = scl.neq(3).and(scl.neq(8)).and(scl.neq(9)).and(scl.neq(10));
+  var mask = scl.neq(3)
+    .and(scl.neq(8))
+    .and(scl.neq(9))
+    .and(scl.neq(10));
+    
   return image.updateMask(mask).select(bands);
 }
 
 // ===========================
-// CDL + points
+// CDL + confidence ≥ 90
 // ===========================
-var cdl = ee.Image("USDA/NASS/CDL/2021").select('cropland');
-var cropCodes = [1, 2, 3, 4, 5, 6, 12, 21, 22, 23, 24, 26, 28, 36, 41, 42, 43];
-var cropMask = cdl.remap(cropCodes, ee.List.repeat(1, cropCodes.length), 0).eq(1);
+var cdlFull = ee.Image("USDA/NASS/CDL/2021");
 
-var points = cdl.updateMask(cropMask).clip(arkansas).sample({
+var cdl = cdlFull.select('cropland');
+var confidence = cdlFull.select('confidence');
+
+// soybeans = 5    //a changer selon le crop qu'on souhaite extraire de notre zone
+var soybeansMask = cdl.eq(5).and(confidence.gte(90));
+
+// ===========================
+// Sampling
+// ===========================
+var points = cdl.updateMask(soybeansMask).clip(arkansas).sample({
   region: arkansas,
   scale: 30,
-  numPixels: 15000,
+  numPixels: 40000, 
   seed: 42,
   geometries: true
 });
 
 // ===========================
-// Collection S2
+// Sentinel-2
 // ===========================
 var collection = ee.ImageCollection('COPERNICUS/S2_SR')
   .filterDate(startDate, endDate)
@@ -40,16 +97,14 @@ var collection = ee.ImageCollection('COPERNICUS/S2_SR')
   .map(maskClouds);
 
 // ===========================
-// Image vide de référence
-// pour les périodes sans images
+// Image vide
 // ===========================
 var emptyImage = ee.Image.constant(ee.List.repeat(0, bands.length))
   .rename(bands)
   .toFloat();
 
 // ===========================
-// Image 360 bandes
-// avec gestion période vide
+// Stack temporel
 // ===========================
 var stackedImage = ee.Image([]);
 
@@ -58,9 +113,7 @@ for (var i = 0; i < 36; i++) {
   var end   = ee.Date(startDate).advance((i + 1) * 10, 'day');
 
   var periodCollection = collection.filterDate(start, end);
-  
-  // Si la période est vide → image de zeros
-  // Sinon → médiane normale
+
   var composite = ee.Image(ee.Algorithms.If(
     periodCollection.size().gt(0),
     periodCollection.median().unmask(0).toFloat(),
@@ -82,7 +135,7 @@ var imageWithLabel = stackedImage
   .clip(arkansas);
 
 // ===========================
-// Extraire aux points
+// Extraction
 // ===========================
 var finalPoints = imageWithLabel.reduceRegions({
   collection: points,
@@ -91,39 +144,31 @@ var finalPoints = imageWithLabel.reduceRegions({
   tileScale: 8
 });
 
-// Coordonnées + filtre nulls
+// Nettoyage
 finalPoints = finalPoints
   .filter(ee.Filter.notNull(['crop_label']))
   .map(function(f) {
     var coords = f.geometry().coordinates();
     return f
       .set('longitude', coords.get(0))
-      .set('latitude',  coords.get(1));
+      .set('latitude', coords.get(1));
   });
 
-print('Points finaux:', finalPoints.size());
-print('Premier point:', finalPoints.first());
 
+var final = finalPoints
+  .randomColumn('random')
+  .sort('random')
+  .limit(4677);    //a changer selon le nombre d'echantillons par crop
 
+print('Nombre final:', final.size());
 
-// Ajouter un index à chaque point
-var pointsList = finalPoints.toList(finalPoints.size());
-
-var points_part1 = ee.FeatureCollection(pointsList.slice(0, 5000));
-var points_part2 = ee.FeatureCollection(pointsList.slice(5000, 9218));
-
+// ===========================
+// Export CSV
+// ===========================
 Export.table.toDrive({
-  collection: points_part1,
-  description: 'Arkansas_part1_5000pts',
-  folder: 'GEE_Arkansas',
-  fileNamePrefix: 'Arkansas_part1',
-  fileFormat: 'CSV'
-});
-
-Export.table.toDrive({
-  collection: points_part2,
-  description: 'Arkansas_part2_5000pts',
-  folder: 'GEE_Arkansas',
-  fileNamePrefix: 'Arkansas_part2',
+  collection: final,
+  description: 'arkansas_soybeans_4677pts',
+  folder: 'GEE_arkansas',
+  fileNamePrefix: 'arkansas_soybeans_4677',
   fileFormat: 'CSV'
 });
